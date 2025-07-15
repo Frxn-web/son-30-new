@@ -2,40 +2,90 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Son 30 - Dominó Dominicano</title>
   <meta name="theme-color" content="#0ea5e9"/>
-  <link rel="manifest" href="manifest.json"/>
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192x192.png"/>
-  <link rel="icon" type="image/png" sizes="512x512" href="icon-512x512.png"/>
-  <link rel="apple-touch-icon" href="icon-192x192.png"/>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Monetización Scripts -->
+  <script type='text/javascript' src='//lemonpier.com/88/b0/c4/88b0c4128374f446815c86be9fe2118f.js'></script>
+  <script type='text/javascript' src='//lemonpier.com/df/ce/ab/dfceabc2a4d9ef272b264fd8c7d404f5.js'></script>
+  <script async="async" data-cfasync="false" src="//lemonpier.com/2f4b075d22f624536c57ef551cca7302/invoke.js"></script>
+  
   <style>
     html.dark { background: #18181b; }
-    .fade-in { animation: fadeIn 0.7s; }
+    .fade-in { animation: fadeIn 0.5s ease-in-out; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .celebrate { animation: pop 0.5s cubic-bezier(.36,1.01,.32,1.01) 2; }
-    @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+    @keyframes pop { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+    
+    /* Ensure inputs are usable on iOS without zoom */
+    input[type="text"], input[type="number"] {
+      font-size: 16px; /* Prevents auto-zoom on focus in iOS */
+    }
+    
+    /* Ad banner styling */
+    .ad-banner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 50; /* Ensure it's above content but below modals */
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      padding: 8px;
+      text-align: center;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .dark .ad-banner {
+      background: rgba(31, 41, 55, 0.9); /* #1f2937 with opacity */
+    }
+    
+    /* Add padding to the bottom of the body to prevent ad from overlapping content */
+    body {
+      padding-bottom: 80px; /* Adjust based on ad banner height */
+    }
   </style>
 </head>
-<body class="transition-colors duration-300">
+<body class="transition-colors duration-300 dark:bg-gray-900">
   <div id="root"></div>
-  <!-- Banner Adsterra (puedes pegar aquí tu código) -->
-  <!--
-  <div style="position:fixed;bottom:0;left:0;right:0;z-index:1000;background:#fff;padding:5px;text-align:center;box-shadow:0 -2px 10px rgba(0,0,0,0.1);">
-    TU CÓDIGO DE ADSTERRA AQUÍ
+  
+  <!-- Banner Native Ad -->
+  <div class="ad-banner">
+    <div id="container-2f4b075d22f624536c57ef551cca7302"></div>
   </div>
-  -->
+  
   <script type="text/babel">
 
-const { useState, useEffect } = React;
+const { useState, useEffect, useCallback } = React;
 
 function getInitialState() {
-  const saved = localStorage.getItem('son30-state');
-  if (saved) return JSON.parse(saved);
+  try {
+    const saved = localStorage.getItem('son30-state');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Ensure all keys are present to avoid errors after an update
+      return {
+        players: parsed.players || ['', '', '', ''],
+        scores: parsed.scores || { team1: 0, team2: 0 },
+        rounds: parsed.rounds || [],
+        stats: parsed.stats || { team1: 0, team2: 0 },
+        target: parsed.target || 100,
+        dark: parsed.dark !== undefined ? parsed.dark : window.matchMedia('(prefers-color-scheme: dark)').matches,
+      };
+    }
+  } catch (error) {
+    console.error("Failed to parse state from localStorage", error);
+  }
   return {
     players: ['', '', '', ''],
     scores: { team1: 0, team2: 0 },
@@ -47,69 +97,94 @@ function getInitialState() {
 }
 
 function App() {
-  const [players, setPlayers] = useState(getInitialState().players);
-  const [scores, setScores] = useState(getInitialState().scores);
-  const [rounds, setRounds] = useState(getInitialState().rounds);
-  const [target, setTarget] = useState(getInitialState().target);
-  const [stats, setStats] = useState(getInitialState().stats);
-  const [gameState, setGameState] = useState('setup'); // setup, playing, finished
+  const [state, setState] = useState(getInitialState);
+  const { players, scores, rounds, stats, target, dark } = state;
+
+  const [gameState, setGameState] = useState(() => {
+    const saved = getInitialState();
+    if (saved.players.every(p => p.trim() !== '') && saved.rounds.length > 0) {
+        // If there are players and rounds, assume game is in progress
+        return 'playing';
+    }
+    if (saved.players.every(p => p.trim() !== '')) {
+        // If there are only players, but no rounds, start in playing screen
+        return 'playing';
+    }
+    return 'setup';
+  });
+  
   const [winner, setWinner] = useState(null);
   const [celebration, setCelebration] = useState('');
   const [editNames, setEditNames] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [dark, setDark] = useState(getInitialState().dark);
+  const [notification, setNotification] = useState(null);
 
-  // Guardar en localStorage
+  const updateState = (newState) => {
+    setState(prevState => ({ ...prevState, ...newState }));
+  };
+
+  // Save to localStorage
   useEffect(() => {
-    localStorage.setItem('son30-state', JSON.stringify({
-      players, scores, rounds, stats, target, dark
-    }));
+    localStorage.setItem('son30-state', JSON.stringify(state));
     document.documentElement.classList.toggle('dark', dark);
-  }, [players, scores, rounds, stats, target, dark]);
+  }, [state]);
 
-  // Detectar ganador
+  // Check for winner
   useEffect(() => {
-    if (scores.team1 >= target || scores.team2 >= target) {
+    if (gameState === 'playing' && (scores.team1 >= target || scores.team2 >= target)) {
       const win = scores.team1 >= target ? 'team1' : 'team2';
       setWinner(win);
       setGameState('finished');
       setCelebration('🏆 ¡GANADORES! 🏆');
-      setStats(s => ({ ...s, [win]: s[win] + 1 }));
+      updateState({ stats: { ...stats, [win]: stats[win] + 1 } });
       setTimeout(() => setCelebration(''), 2500);
     }
-  }, [scores, target]);
+  }, [scores, target, gameState]);
 
-  // Compartir resultado
-  function shareResult() {
-    const text = `¡Ganó ${players[winner === 'team1' ? 0 : 2]} y ${players[winner === 'team1' ? 1 : 3]} en Son 30! Marcador final: ${scores.team1} - ${scores.team2}`;
+  // Share result
+  const shareResult = useCallback(() => {
+    const winnerTeam = winner === 'team1' ? 'Pareja 1' : 'Pareja 2';
+    const winnerPlayers = winner === 'team1' ? `${players[0]} y ${players[1]}` : `${players[2]} y ${players[3]}`;
+    const text = `¡Ganó ${winnerPlayers} (${winnerTeam}) en Son 30! Marcador final: ${scores.team1} - ${scores.team2}`;
     if (navigator.share) {
-      navigator.share({ text });
+      navigator.share({ text, title: 'Resultado de Son 30' });
     } else {
-      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`);
+      navigator.clipboard.writeText(text).then(() => {
+        setNotification('¡Resultado copiado!');
+        setTimeout(() => setNotification(null), 2000);
+      });
     }
-  }
+  }, [winner, players, scores]);
 
-  // Reiniciar todo
-  function resetAll() {
-    setPlayers(['', '', '', '']);
-    setScores({ team1: 0, team2: 0 });
-    setRounds([]);
+  // Reset all
+  const resetAll = useCallback(() => {
+    localStorage.removeItem('son30-state');
+    setState({
+      players: ['', '', '', ''],
+      scores: { team1: 0, team2: 0 },
+      rounds: [],
+      stats: { team1: 0, team2: 0 },
+      target: 100,
+      dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+    });
     setWinner(null);
     setGameState('setup');
     setCelebration('');
-  }
+  }, []);
 
-  // Nueva partida (mantiene nombres y stats)
-  function newGame() {
-    setScores({ team1: 0, team2: 0 });
-    setRounds([]);
+  // New game (keeps names and stats)
+  const newGame = useCallback(() => {
+    updateState({
+      scores: { team1: 0, team2: 0 },
+      rounds: [],
+    });
     setWinner(null);
     setGameState('playing');
     setCelebration('');
-  }
+  }, [updateState]);
 
-  // Sumar puntos
-  function addPoints(team, points, type = 'normal') {
+  // Add points
+  const addPoints = useCallback((team, points, type = 'normal') => {
     if (gameState !== 'playing') return;
     const newScores = { ...scores, [team]: scores[team] + points };
     const newRound = {
@@ -117,231 +192,313 @@ function App() {
       team,
       points,
       type,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-    setScores(newScores);
-    setRounds([...rounds, newRound]);
+    updateState({ scores: newScores, rounds: [...rounds, newRound] });
     if (type !== 'normal') {
       setCelebration(type === 'capicua' ? '🎉 ¡Capicúa! 🎉' : '🚶 ¡Paso Corrido! 🚶');
       setTimeout(() => setCelebration(''), 1800);
     }
-  }
+  }, [gameState, scores, rounds, updateState]);
 
-  // Deshacer última ronda
-  function undoLastRound() {
+  // Undo last round
+  const undoLastRound = useCallback(() => {
     if (!rounds.length) return;
     const last = rounds[rounds.length - 1];
-    setScores(s => ({ ...s, [last.team]: s[last.team] - last.points }));
-    setRounds(r => r.slice(0, -1));
-    setWinner(null);
-    setGameState('playing');
-  }
+    const newScores = { ...scores, [last.team]: scores[last.team] - last.points };
+    const newRounds = rounds.slice(0, -1);
+    updateState({ scores: newScores, rounds: newRounds });
+    if (winner) {
+        setWinner(null);
+        setGameState('playing');
+    }
+  }, [rounds, scores, winner, updateState]);
 
-  // Editar nombres
-  function handleNameChange(i, val) {
-    setPlayers(p => {
-      const copy = [...p];
-      copy[i] = val;
-      return copy;
-    });
-  }
+  const handleNameChange = (i, val) => {
+    const newPlayers = [...players];
+    newPlayers[i] = val;
+    updateState({ players: newPlayers });
+  };
 
-  // Cambiar puntaje objetivo
-  function handleTargetChange(val) {
+  const handleTargetChange = (val) => {
     let n = parseInt(val, 10);
-    if (isNaN(n) || n < 30) n = 30;
+    if (isNaN(n) || n < 30) n = ''; // Allow empty for typing
     if (n > 300) n = 300;
-    setTarget(n);
+    updateState({ target: n });
+  };
+  
+  const handleTargetBlur = () => {
+    if (target < 30 || !target) {
+        updateState({ target: 30 });
+    }
   }
 
-  // Cambiar modo oscuro
-  function toggleDark() {
-    setDark(d => !d);
-  }
+  const toggleDark = () => updateState({ dark: !dark });
 
-  // Pantalla de setup
   if (gameState === 'setup') {
     return (
-      <div className={`min-h-screen ${dark ? 'bg-gray-900 text-white' : 'bg-gradient-to-br from-sky-400 to-blue-600 text-gray-900'} flex items-center justify-center fade-in`}>
+      <div className={`min-h-screen ${dark ? 'bg-gray-900 text-white' : 'bg-gradient-to-br from-sky-400 to-blue-600'} flex items-center justify-center fade-in p-4`}>
         <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6">
           <h1 className="text-3xl font-extrabold text-center mb-2">🎯 Son 30</h1>
           <p className="text-center mb-6 text-gray-500 dark:text-gray-300">Dominó Dominicano</p>
-          <div className="mb-4">
-            <label className="block font-semibold mb-1">Puntaje objetivo</label>
-            <input type="number" min="30" max="300" value={target} onChange={e => handleTargetChange(e.target.value)}
-              className="w-full p-2 rounded-lg border dark:bg-gray-700 dark:text-white"/>
+          
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block font-semibold mb-2">Puntaje objetivo</label>
+              <input 
+                type="number" 
+                min="30" 
+                max="300" 
+                value={target} 
+                onChange={e => handleTargetChange(e.target.value)}
+                onBlur={handleTargetBlur}
+                className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white text-lg"
+              />
+            </div>
+            
+            <div>
+              <label className="block font-semibold mb-2">Pareja 1</label>
+              <input 
+                type="text" 
+                placeholder="Jugador 1" 
+                value={players[0]} 
+                onChange={e => handleNameChange(0, e.target.value)}
+                className="w-full p-3 rounded-lg border mb-3 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              <input 
+                type="text" 
+                placeholder="Jugador 2" 
+                value={players[1]} 
+                onChange={e => handleNameChange(1, e.target.value)}
+                className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+            </div>
+            
+            <div>
+              <label className="block font-semibold mb-2">Pareja 2</label>
+              <input 
+                type="text" 
+                placeholder="Jugador 3" 
+                value={players[2]} 
+                onChange={e => handleNameChange(2, e.target.value)}
+                className="w-full p-3 rounded-lg border mb-3 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              <input 
+                type="text" 
+                placeholder="Jugador 4" 
+                value={players[3]} 
+                onChange={e => handleNameChange(3, e.target.value)}
+                className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+            </div>
           </div>
-          <div className="mb-4">
-            <label className="block font-semibold mb-1">Pareja 1</label>
-            <input type="text" placeholder="Jugador 1" value={players[0]} onChange={e => handleNameChange(0, e.target.value)}
-              className="w-full p-2 rounded-lg border mb-2 dark:bg-gray-700 dark:text-white"/>
-            <input type="text" placeholder="Jugador 2" value={players[1]} onChange={e => handleNameChange(1, e.target.value)}
-              className="w-full p-2 rounded-lg border dark:bg-gray-700 dark:text-white"/>
-          </div>
-          <div className="mb-4">
-            <label className="block font-semibold mb-1">Pareja 2</label>
-            <input type="text" placeholder="Jugador 3" value={players[2]} onChange={e => handleNameChange(2, e.target.value)}
-              className="w-full p-2 rounded-lg border mb-2 dark:bg-gray-700 dark:text-white"/>
-            <input type="text" placeholder="Jugador 4" value={players[3]} onChange={e => handleNameChange(3, e.target.value)}
-              className="w-full p-2 rounded-lg border dark:bg-gray-700 dark:text-white"/>
-          </div>
+          
           <button
-            className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 rounded-xl text-lg transition-colors"
+            className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-4 rounded-xl text-lg transition-transform transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={!players.every(n => n.trim())}
             onClick={() => setGameState('playing')}
-          >Comenzar Partida</button>
+          >
+            Comenzar Partida
+          </button>
+          
           <div className="mt-4 flex justify-between items-center">
-            <button onClick={toggleDark} className="text-sm text-gray-400 hover:text-sky-500">
+            <button onClick={toggleDark} className="text-sm text-gray-400 hover:text-sky-500 p-2">
               {dark ? '☀️ Modo Claro' : '🌙 Modo Oscuro'}
             </button>
-            <span className="text-xs text-gray-400">v2.0</span>
+            <span className="text-xs text-gray-400">v2.3</span>
           </div>
         </div>
       </div>
     );
   }
 
-  // Pantalla principal
   return (
-    <div className={`min-h-screen pb-28 ${dark ? 'bg-gray-900 text-white' : 'bg-gradient-to-br from-green-300 to-blue-400 text-gray-900'} fade-in`}>
-      {/* Header */}
-      <div className="max-w-2xl mx-auto pt-4 px-2">
-        <div className={`flex justify-between items-center mb-2`}>
+    <div className={`min-h-screen ${dark ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'} fade-in`}>
+      <div className="max-w-3xl mx-auto p-4">
+        {/* Header */}
+        <header className="flex justify-between items-center mb-4">
           <h1 className="text-2xl font-extrabold">🎯 Son 30</h1>
-          <button onClick={toggleDark} className="text-lg">{dark ? '☀️' : '🌙'}</button>
-        </div>
-        <div className="flex justify-between items-center mb-2">
-          <button
-            className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-1 rounded-lg text-sm"
-            onClick={() => setEditNames(e => !e)}
-          >{editNames ? 'Listo' : 'Editar Nombres'}</button>
-          <button
-            className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-1 rounded-lg text-sm"
-            onClick={() => setConfirm('reset')}
-          >Reiniciar Todo</button>
-        </div>
-      </div>
+          <div className="flex items-center gap-2">
+            <button
+                className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg text-sm font-medium"
+                onClick={() => setEditNames(e => !e)}
+            >
+                {editNames ? '✓ Listo' : '✏️'}
+            </button>
+            <button onClick={toggleDark} className="text-xl p-2">{dark ? '☀️' : '🌙'}</button>
+          </div>
+        </header>
 
-      {/* Celebración */}
-      {celebration && (
-        <div className="max-w-2xl mx-auto mb-2">
-          <div className="bg-yellow-400 dark:bg-yellow-600 text-center p-4 rounded-xl mb-2 celebrate text-2xl font-bold shadow">{celebration}</div>
-        </div>
-      )}
+        {/* Celebration */}
+        {celebration && (
+          <div className="mb-4 bg-yellow-400 dark:bg-yellow-600 text-center p-4 rounded-xl celebrate text-2xl font-bold shadow">
+            {celebration}
+          </div>
+        )}
 
-      {/* Marcadores */}
-      <div className="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        {[0, 2].map((i, idx) => {
-          const team = idx === 0 ? 'team1' : 'team2';
-          const color = idx === 0 ? 'red' : 'blue';
-          return (
-            <div key={team} className={`rounded-2xl shadow-lg p-4 bg-${color}-100 dark:bg-${color}-900`}>
-              <div className="flex justify-between items-center mb-2">
-                <div className={`font-bold text-${color}-700 dark:text-${color}-200 text-lg`}>👥 Pareja {idx + 1}</div>
-                <div className="text-xs text-gray-500 dark:text-gray-300">Victorias: {stats[team]}</div>
-              </div>
-              <div className="mb-2">
-                {editNames ? (
-                  <>
-                    <input type="text" value={players[i]} onChange={e => handleNameChange(i, e.target.value)}
-                      className="w-full p-1 rounded mb-1 border dark:bg-gray-700 dark:text-white"/>
-                    <input type="text" value={players[i+1]} onChange={e => handleNameChange(i+1, e.target.value)}
-                      className="w-full p-1 rounded border dark:bg-gray-700 dark:text-white"/>
-                  </>
-                ) : (
-                  <div className="text-base font-semibold">{players[i]} & {players[i+1]}</div>
+        {/* Scoreboards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {[0, 2].map((i, idx) => {
+            const team = idx === 0 ? 'team1' : 'team2';
+            const color = idx === 0 ? 'red' : 'blue';
+            return (
+              <div key={team} className={`rounded-2xl shadow-lg p-4 bg-white dark:bg-gray-800`}>
+                <div className="flex justify-between items-center mb-3">
+                  <div className={`font-bold text-${color}-700 dark:text-${color}-300 text-lg`}>
+                    👥 Pareja {idx + 1}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Victorias: {stats[team]}
+                  </div>
+                </div>
+                
+                <div className="mb-3">
+                  {editNames ? (
+                    <div className="space-y-2">
+                      <input type="text" value={players[i]} onChange={e => handleNameChange(i, e.target.value)} className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                      <input type="text" value={players[i+1]} onChange={e => handleNameChange(i+1, e.target.value)} className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                    </div>
+                  ) : (
+                    <div className="text-base font-semibold truncate">{players[i]} & {players[i+1]}</div>
+                  )}
+                </div>
+                
+                <div className={`text-5xl font-extrabold text-${color}-600 dark:text-${color}-300 mb-3`}>
+                  {scores[team]}
+                </div>
+                
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-4">
+                  <div
+                    className={`h-3 rounded-full bg-gradient-to-r from-${color}-400 to-${color}-600`}
+                    style={{ width: `${Math.min(100, (scores[team] / target) * 100)}%`, transition: 'width 0.5s' }}
+                  ></div>
+                </div>
+                
+                {gameState === 'playing' && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[5, 10, 15, 20].map(p => (
+                        <button key={p} onClick={() => addPoints(team, p)} className={`bg-${color}-500 hover:bg-${color}-600 text-white py-3 px-4 rounded-lg font-bold transition-transform transform active:scale-95 text-lg`}>
+                          +{p}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => addPoints(team, 30, 'capicua')} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white py-3 rounded-lg font-bold transition-transform transform active:scale-95">
+                      🎯 Capicúa (+30)
+                    </button>
+                    <button onClick={() => addPoints(team, 30, 'paso')} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-lg font-bold transition-transform transform active:scale-95">
+                      🚶 Paso Corrido (+30)
+                    </button>
+                  </div>
                 )}
               </div>
-              <div className={`text-4xl font-extrabold text-${color}-600 dark:text-${color}-200 mb-2`}>{scores[team]}</div>
-              {/* Barra de progreso */}
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-2">
-                <div
-                  className={`h-3 rounded-full bg-gradient-to-r from-${color}-400 to-${color}-600`}
-                  style={{ width: `${Math.min(100, Math.round((scores[team] / target) * 100))}%`, transition: 'width 0.5s' }}
-                ></div>
-              </div>
-              {/* Botones de puntos */}
-              {gameState === 'playing' && (
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  {[5, 10, 15, 20].map(p => (
-                    <button key={p} onClick={() => addPoints(team, p)}
-                      className={`bg-${color}-500 hover:bg-${color}-600 text-white p-2 rounded-lg font-bold transition-colors`}>+{p}</button>
-                  ))}
-                  <button onClick={() => addPoints(team, 30, 'capicua')}
-                    className="col-span-3 bg-yellow-500 hover:bg-yellow-600 text-white p-2 rounded-lg font-bold mt-1">🎯 Capicúa (+30)</button>
-                  <button onClick={() => addPoints(team, 30, 'paso')}
-                    className="col-span-3 bg-orange-500 hover:bg-orange-600 text-white p-2 rounded-lg font-bold mt-1">🚶 Paso Corrido (+30)</button>
+            );
+          })}
+        </div>
+
+        {/* Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+          <button
+            onClick={() => setConfirm('undo')}
+            className="w-full bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform active:scale-95"
+            disabled={!rounds.length}
+          >
+            ↶ Deshacer
+          </button>
+          <button
+            onClick={() => setConfirm('new')}
+            className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-bold transition-transform transform active:scale-95"
+          >
+            🎮 Nueva Partida
+          </button>
+        </div>
+         <button
+            onClick={() => setConfirm('reset')}
+            className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold transition-transform transform active:scale-95"
+          >
+            🔄 Reiniciar Todo
+          </button>
+
+        {/* History */}
+        {rounds.length > 0 && (
+          <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+            <h3 className="font-bold text-gray-800 dark:text-gray-200 mb-3 text-lg">📋 Historial</h3>
+            <div className="max-h-48 overflow-y-auto space-y-2 pr-2">
+              {rounds.slice().reverse().map((round) => (
+                <div key={round.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
+                  <span className="font-medium">{round.team === 'team1' ? 'Pareja 1' : 'Pareja 2'}</span>
+                  <span className={`font-bold ${round.type !== 'normal' ? 'text-yellow-500' : ''}`}>
+                    +{round.points} {round.type === 'capicua' ? '🎯' : round.type === 'paso' ? '🚶' : ''}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{round.timestamp}</span>
                 </div>
-              )}
+              ))}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        )}
 
-      {/* Controles */}
-      <div className="max-w-2xl mx-auto flex flex-col md:flex-row gap-2 mb-4">
-        <button
-          onClick={() => setConfirm('undo')}
-          className="flex-1 bg-gray-500 hover:bg-gray-600 text-white p-3 rounded-xl font-bold"
-          disabled={!rounds.length}
-        >↶ Deshacer Última Ronda</button>
-        <button
-          onClick={newGame}
-          className="flex-1 bg-green-500 hover:bg-green-600 text-white p-3 rounded-xl font-bold"
-        >Nueva Partida</button>
-      </div>
-
-      {/* Historial */}
-      {rounds.length > 0 && (
-        <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg mb-4">
-          <h3 className="font-bold text-gray-800 dark:text-gray-200 mb-3">📋 Historial de Rondas</h3>
-          <div className="max-h-40 overflow-y-auto space-y-2">
-            {rounds.slice().reverse().map((round) => (
-              <div key={round.id} className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                <span className="font-medium">{round.team === 'team1' ? 'Pareja 1' : 'Pareja 2'}</span>
-                <span className={`font-bold ${round.type !== 'normal' ? 'text-yellow-600 dark:text-yellow-300' : ''}`}>
-                  +{round.points} {round.type !== 'normal' ? `(${round.type})` : ''}
-                </span>
-                <span className="text-sm text-gray-500 dark:text-gray-300">{round.timestamp}</span>
+        {/* Winner Modal */}
+        {gameState === 'finished' && winner && (
+          <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] fade-in p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 text-center shadow-2xl w-full max-w-md">
+              <div className="text-5xl mb-4 celebrate">🏆</div>
+              <h2 className="text-2xl font-bold mb-2">¡Partida Terminada!</h2>
+              <p className="mb-4 text-lg">Ganó <b>{winner === 'team1' ? `${players[0]} & ${players[1]}` : `${players[2]} & ${players[3]}`}</b></p>
+              <div className="mb-6 text-xl">Marcador final: <b>{scores.team1} - {scores.team2}</b></div>
+              <div className="space-y-3">
+                <button onClick={newGame} className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-bold transition-transform transform active:scale-95">
+                  🎮 Jugar Revancha
+                </button>
+                <button onClick={shareResult} className="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-xl font-bold transition-transform transform active:scale-95">
+                  📱 Compartir Resultado
+                </button>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Pantalla de ganador */}
-      {gameState === 'finished' && winner && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 fade-in">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl p-8 text-center shadow-2xl">
-            <div className="text-4xl mb-2 celebrate">🏆</div>
-            <h2 className="text-2xl font-bold mb-2">¡Ganó {players[winner === 'team1' ? 0 : 2]} y {players[winner === 'team1' ? 1 : 3]}!</h2>
-            <div className="mb-4 text-lg">Marcador final: <b>{scores.team1} - {scores.team2}</b></div>
-            <button onClick={newGame} className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-xl font-bold mr-2">Nueva Partida</button>
-            <button onClick={shareResult} className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold">Compartir</button>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmaciones */}
-      {confirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 fade-in">
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 text-center shadow-xl">
-            <div className="mb-4 text-lg">
-              {confirm === 'reset' ? '¿Seguro que quieres reiniciar todo?' : '¿Deshacer la última ronda?'}
             </div>
-            <button onClick={() => {
-              if (confirm === 'reset') resetAll();
-              if (confirm === 'undo') undoLastRound();
-              setConfirm(null);
-            }} className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-xl font-bold mr-2">Sí</button>
-            <button onClick={() => setConfirm(null)} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-xl font-bold">No</button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Estadísticas */}
-      <div className="max-w-2xl mx-auto mt-4 text-center text-xs text-gray-500 dark:text-gray-400">
-        <span>Victorias: {players[0]} y {players[1]}: {stats.team1} | {players[2]} y {players[3]}: {stats.team2}</span>
+        {/* Confirmation Modal */}
+        {confirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] fade-in p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 text-center shadow-xl w-full max-w-sm">
+              <p className="mb-6 text-lg">
+                {
+                  {
+                    'reset': '¿Seguro que quieres reiniciar todo? Se perderán nombres y estadísticas.',
+                    'undo': '¿Deshacer la última ronda?',
+                    'new': '¿Empezar una nueva partida?'
+                  }[confirm]
+                }
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    if (confirm === 'reset') resetAll();
+                    if (confirm === 'undo') undoLastRound();
+                    if (confirm === 'new') newGame();
+                    setConfirm(null);
+                  }} 
+                  className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-bold transition-transform transform active:scale-95"
+                >
+                  Sí, continuar
+                </button>
+                <button 
+                  onClick={() => setConfirm(null)} 
+                  className="w-full bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-800 dark:text-gray-200 py-3 rounded-xl font-bold transition-transform transform active:scale-95"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Notification Toast */}
+        {notification && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg z-[150] fade-in">
+            {notification}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -349,12 +506,6 @@ function App() {
 
 ReactDOM.render(<App />, document.getElementById('root'));
   </script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js');
-      });
-    }
-  </script>
+  
 </body>
 </html>
